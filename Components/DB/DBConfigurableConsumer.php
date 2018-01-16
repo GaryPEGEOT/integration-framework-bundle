@@ -21,6 +21,9 @@ class DBConfigurableConsumer extends Service implements ConfigurableConsumerInte
     use UsesSmartesbHelper;
     use IsConfigurableService;
 
+    const SLEEP_TIME = 100; // Duration of the pause made in the consume loop, when nothing to do (slow mode), in milliseconds.
+    const INACTIVITY_TRIGGER = 10; // Inactivity duration before switching to slow mode, in seconds.
+
     /** @var ConfigurableStepsProviderInterface */
     protected $configurableStepsProvider;
 
@@ -105,17 +108,29 @@ class DBConfigurableConsumer extends Service implements ConfigurableConsumerInte
 
     public function consume(EndpointInterface $endpoint)
     {
+        $iFeelAsleep = false;
+        $wakeup = microtime();
+
         while (!$this->shouldStop()) {
             // Receive
             $message = $this->readMessage($endpoint);
 
             // Process
             if ($message) {
+                $iFeelAsleep = false;
+                $wakeup = microtime();
                 --$this->expirationCount;
 
                 $endpoint->handle($message);
 
                 $this->onConsume($endpoint, $message);
+            }
+            if ($iFeelAsleep) {
+                usleep(self::SLEEP_TIME * 1000); // 100 ms
+            }
+
+            if ((microtime() - $wakeup) > self::INACTIVITY_TRIGGER) { // I did nothing since the last x seconds, so I enter the slow mode...
+                $iFeelAsleep = true;
             }
         }
     }
